@@ -10,16 +10,7 @@ export class Financeiro {
   @Column()
   descricao: string;
 
-  //  @Column('float')
-  //  valorTotal: number;
-
-  @Column({
-    name: 'valorTotal',
-    type: 'decimal',
-    precision: 10,
-    scale: 2,
-    nullable: true,
-  })
+  @Column('float', { nullable: true }) // <--- ADICIONE O { nullable: true } AQUI
   valorTotal: number;
 
   @Column()

@@ -1,0 +1,213 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+const PdfPrinter = require('pdfmake');
+
+  // --- GERADOR DE PDF ---
+  async gerarCarnePDF(dadosConfig: any): Promise<Buffer> {
+    const { ano, meses, incluirCapa, incluirMatricula } = dadosConfig;
+    console.log('=== BACKEND: INICIANDO GERAÇÃO DE PDF ===');
+    console.log('Dados recebidos no Service:', { ano, meses, incluirCapa });
+    // AQUI ESTAVA O PROBLEMA: Fontes
+    // Vamos usar fontes padrão do sistema (StandardFonts) que não exigem arquivos .ttf
+    const fonts = {
+      Courier: {
+        normal: 'Courier',
+        bold: 'Courier-Bold',
+        italics: 'Courier-Oblique',
+        bolditalics: 'Courier-BoldOblique',
+      },
+      Helvetica: {
+        normal: 'Helvetica',
+        bold: 'Helvetica-Bold',
+        italics: 'Helvetica-Oblique',
+        bolditalics: 'Helvetica-BoldOblique',
+      },
+    };
+
+    const printer = new (PdfPrinter as any)(fonts);
+
+    const matriculas = await this.matriculaRepo.find({ relations: ['aluno'] });
+    console.log(`Gerando carnês para ${matriculas.length} alunos...`); // LOG NO SERVER
+
+    const docContent: any[] = [];
+
+    for (const mat of matriculas) {
+      const nomeAluno = mat.aluno?.nome || 'Aluno Sem Nome';
+      const diaVencimento = mat.diaVencimento || 10;
+      const valorMensalidade = Number(mat.valorMensalidade || 0);
+      const stackAluno: any[] = [];
+
+      if (incluirCapa) {
+        stackAluno.push({
+          stack: [
+            {
+              text: 'CARNÊ DE PAGAMENTO',
+              style: 'capaTitulo',
+              alignment: 'center',
+            },
+            { text: '\n' },
+            {
+              text: `Aluno: ${nomeAluno.toUpperCase()}\nVencimento: dia ${diaVencimento}`,
+              style: 'capaTexto',
+              alignment: 'center',
+            },
+            { text: '\n' },
+            {
+              text: 'Após 5 dias do vencimento será cobrado multa de R$ 5.00',
+              style: 'capaMulta',
+              alignment: 'center',
+            },
+          ],
+          absolutePosition: { x: 40, y: null },
+          margin: [0, 0, 0, 28],
+        });
+      }
+
+      if (incluirMatricula) {
+        stackAluno.push(
+          this.criarLayoutParcela('Matrícula', 'Única', nomeAluno, null, null),
+        );
+      }
+
+      if (meses && meses.length > 0) {
+        meses.forEach((mesNum) => {
+          const nomeMes = this.getNomeMes(mesNum);
+          const dataVenc = `${diaVencimento}/${mesNum.toString().padStart(2, '0')}/${ano}`;
+          stackAluno.push(
+            this.criarLayoutParcela(
+              'Mensalidade',
+              `${nomeMes}/${ano}`,
+              nomeAluno,
+              dataVenc,
+              valorMensalidade,
+            ),
+          );
+        });
+      }
+
+      docContent.push(...stackAluno);
+      docContent.push({ text: '', pageBreak: 'after' });
+    }
+
+    const docDefinition = {
+      content: docContent,
+      defaultStyle: { font: 'Helvetica' }, // Fonte Segura
+      pageSize: 'A4',
+      pageMargins: [20, 20, 20, 20] as [number, number, number, number],
+      styles: {
+        capaTitulo: { fontSize: 18, bold: true },
+        capaTexto: { fontSize: 12, bold: true },
+        capaMulta: { fontSize: 10, color: 'red' },
+        reciboTitulo: { fontSize: 10, bold: true },
+        reciboTexto: { fontSize: 9 },
+        reciboValor: { fontSize: 12, bold: true },
+      },
+    };
+
+    const pdfDoc = printer.createPdfKitDocument(docDefinition as any);
+
+    return new Promise((resolve, reject) => {
+      const chunks: any[] = [];
+      pdfDoc.on('data', (chunk) => chunks.push(chunk));
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+      pdfDoc.on('error', (err) => {
+        console.error('ERRO DENTRO DO PDFMAKE:', err); // LOG DE ERRO
+        reject(err instanceof Error ? err : new Error(String(err)));
+      });
+      pdfDoc.end();
+    });
+  }
+
+  private criarLayoutParcela(
+    tipo: string,
+    referencia: string,
+    aluno: string,
+    vencimento: string | null,
+    valor: number | null,
+  ) {
+    const conteudoRecibo = [
+      { text: `Recibo de ${tipo}`, style: 'reciboTitulo', alignment: 'center' },
+      { text: '\n' },
+      {
+        text: aluno.substring(0, 25),
+        style: 'reciboTexto',
+        alignment: 'center',
+      },
+      { text: '\n' },
+      {
+        text: tipo === 'Matrícula' ? 'MATRÍCULA' : `Mensalidade ${referencia}`,
+        fontSize: 10,
+        bold: true,
+        alignment: 'center',
+      },
+      { text: '\n' },
+      {
+        columns: [
+          {
+            text: vencimento ? `Venc: ${vencimento}` : '',
+            style: 'reciboTexto',
+            fontSize: 9,
+          },
+          {
+            text: 'Pagto: __/__/__',
+            style: 'reciboTexto',
+            alignment: 'right',
+            fontSize: 9,
+          },
+        ],
+      },
+      {
+        text: valor ? `Valor R$: ${valor.toFixed(2)}` : 'Valor R$: ______',
+        style: 'reciboValor',
+        margin: [0, 5, 0, 0],
+      },
+    ];
+
+    return {
+      columns: [
+        { stack: conteudoRecibo, width: 170 },
+        { text: '', width: 50 },
+        { stack: conteudoRecibo, width: 170 },
+      ],
+      margin: [0, 0, 0, 30],
+    };
+  }
+
+  private getNomeMes(num: number): string {
+    const meses = [
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
+    return meses[num - 1] || '';
+  }
+
+
+
+
+
+
+const dia = String(matricula.diaVencimento).padStart(2, '0');
+      const mesatual = String(new Date().getMonth() + 1).padStart(2, '0');
+      const dataString = `${ano}-${mesatual}-${dia}`;
+
+      const novaParcela = this.financeiroRepo.create({
+        matricula: matricula,
+        aluno: matricula.aluno,
+        descricao: `Mtricula ${mesatual}/${ano}`,
+        dataVencimento: dataString,
+        valorTotal: Number(matricula.valorMatricula),
+        status: 'Aberta',
+        tipo: 'Receita',
+      });
+
+      novasParcelas.push(novaParcela);
+    }

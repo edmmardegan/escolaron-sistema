@@ -11,7 +11,7 @@ export class CursoService {
   ) {}
 
   findAll() {
-    return this.repo.find();
+    return this.repo.find({ order: { nome: 'ASC' } });
   }
 
   create(dados: Partial<Curso>) {
@@ -19,6 +19,10 @@ export class CursoService {
   }
 
   // Já deixei pronto para você usar depois se precisar
-  findOne(id: number) { return this.repo.findOneBy({ id }); }
-  remove(id: number) { return this.repo.delete(id); }
+  findOne(id: number) {
+    return this.repo.findOneBy({ id });
+  }
+  remove(id: number) {
+    return this.repo.delete(id);
+  }
 }
