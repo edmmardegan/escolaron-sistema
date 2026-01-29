@@ -1,17 +1,22 @@
 import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
 
-@Entity('users')
+@Entity({ name: 'usuarios' })
 export class User {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ unique: true })
-  username: string;
+  @Column()
+  nome: string;
 
   @Column()
-  password: string;
+  email: string;
 
-  // Trocamos o tipo 'enum' por 'varchar' para evitar conflito de drivers
+  @Column()
+  username: string; // Se o seu banco usa username, mantenha aqui
+
+  @Column()
+  senha: string; // Nome que decidimos usar no código e no banco
+
   @Column({ default: 'user' })
-  role: string; // 'adm' ou 'user'
+  role: string;
 }

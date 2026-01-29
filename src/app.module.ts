@@ -9,41 +9,28 @@ import { CursoModule } from './curso/curso.module';
 import { MatriculaModule } from './matricula/matricula.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
 
-// Entidades
-import { Aluno } from './entities/aluno.entity';
-import { Curso } from './entities/curso.entity';
-import { Matricula } from './entities/matricula.entity';
-import { MatriculaTermo } from './entities/matricula-termo.entity';
-import { Financeiro } from './entities/financeiro.entity';
-import { Aula } from './entities/aula.entity';
 import { AuthModule } from './auth/auth.module';
 import { User } from './entities/user.entity';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot({
-      type: 'postgres', // <--- Verifique se não está 'sqlite' aqui por engano
-      host: 'localhost',
-      port: 5432,
-      username: 'postgres',
-      password: 'mysecretpassword',
+      type: 'postgres',
+      host: '127.0.0.1', // <--- MUDE DE 'localhost' PARA '127.0.0.1'
+      port: 5433,
+      username: 'postgres', // <--- AQUI tem que ser 'postgres', não o seu e-mail!
+      password: '123456', // A senha que você usa no terminal
       database: 'escolaron',
-      entities: [
-        User,
-        Aluno,
-        Aula,
-        Curso,
-        Matricula,
-        MatriculaTermo,
-        Financeiro,
-      ],
-      synchronize: true, // Isso cria as tabelas automaticamente
+      entities: [User],
+      synchronize: true,
     }),
     AlunoModule,
     CursoModule,
     MatriculaModule,
     FinanceiroModule,
     AuthModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -65,8 +65,18 @@ export class FinanceiroService {
     // B. Mensalidades
     for (let mes = mesInicio; mes <= 12; mes++) {
       const mesStr = String(mes).padStart(2, '0');
-      const diaStr = String(matricula.diaVencimento || 10).padStart(2, '0');
 
+      // Pegamos o dia de vencimento original da matrícula
+      let diaVencimentoEfetivo = Number(matricula.diaVencimento || 10);
+
+      // REGRA DE FEVEREIRO: Se o dia for 30 (ou maior que 28), trava no 28
+      if (mesStr === '02' && diaVencimentoEfetivo > 28) {
+        diaVencimentoEfetivo = 28;
+      }
+
+      const diaStr = String(diaVencimentoEfetivo).padStart(2, '0');
+
+      // Mantemos o T12:00:00 para evitar erro de fuso horário
       const dataVencimentoFixa = `${ano}-${mesStr}-${diaStr}T12:00:00`;
 
       novasParcelas.push({
@@ -98,8 +108,14 @@ export class FinanceiroService {
 
       for (let mes = 1; mes <= 12; mes++) {
         const mesStr = String(mes).padStart(2, '0');
-        const diaStr = String(mat.diaVencimento || 10).padStart(2, '0');
+        let diaFinal = Number(mat.diaVencimento || 10);
 
+        // 1. Regra para Fevereiro (vencimentos 30 viram 28)
+        if (mesStr === '02' && diaFinal > 28) {
+          diaFinal = 28;
+        }
+
+        const diaStr = String(diaFinal).padStart(2, '0');
         const dataVencimentoFixa = `${ano}-${mesStr}-${diaStr}T12:00:00`;
         novas.push({
           aluno: mat.aluno,
