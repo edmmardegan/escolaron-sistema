@@ -2,7 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
 import { Aluno } from './aluno.entity';
 import { Matricula } from './matricula.entity';
 
-@Entity()
+@Entity('financeiro')
 export class Financeiro {
   @PrimaryGeneratedColumn()
   id: number;

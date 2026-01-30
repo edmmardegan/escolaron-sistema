@@ -13,7 +13,7 @@ import { Curso } from './curso.entity';
 import { Financeiro } from './financeiro.entity';
 import { MatriculaTermo } from './matricula-termo.entity';
 
-@Entity()
+@Entity('matricula')
 export class Matricula {
   @PrimaryGeneratedColumn()
   id: number;

@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { MatriculaTermo } from './matricula-termo.entity';
 
-@Entity()
+@Entity('aula')
 export class Aula {
   @PrimaryGeneratedColumn()
   id: number;

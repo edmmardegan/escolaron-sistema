@@ -4,11 +4,11 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // --- LIBERA O ACESSO PARA O FRONTEND ---
+  // Habilita o CORS de forma completa
   app.enableCors({
-    origin: '*', // Ou o endereço do seu frontend 'http://localhost:5173'
+    origin: 'http://localhost:5173', // URL do seu frontend Vite
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    allowedHeaders: 'Content-Type, Accept',
+    allowedHeaders: ['Content-Type', 'Authorization'], // IMPORTANTE: Adicione o Authorization aqui
   });
 
   await app.listen(3000);

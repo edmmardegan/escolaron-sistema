@@ -8,7 +8,7 @@ import {
 import { Matricula } from './matricula.entity';
 import { Aula } from './aula.entity'; // <--- O IMPORT DA AULA TEM QUE ESTAR AQUI
 
-@Entity()
+@Entity('matricula_termo')
 export class MatriculaTermo {
   @PrimaryGeneratedColumn()
   id: number;

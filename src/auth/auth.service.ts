@@ -33,17 +33,16 @@ export class AuthService {
   }
 
   // ESSA É A FUNÇÃO QUE ESTAVA FALTANDO:
-  async login(user: any): Promise<{ access_token: string; user: any }> {
-    const payload = {
-      username: user.email,
-      sub: user.id,
-      role: user.role,
-    };
-
+  async login(user: any) {
+    const payload = { username: user.username, sub: user.id, role: user.role };
     return {
-      // Usamos o await aqui para justificar o 'async' da função
       access_token: await this.jwtService.signAsync(payload),
-      user: user,
+      user: {
+        id: user.id,
+        nome: user.nome || user.username, // Garante que tenha um nome
+        email: user.email,
+        role: user.role, // ESSENCIAL para o menu aparecer
+      },
     };
   }
 }
