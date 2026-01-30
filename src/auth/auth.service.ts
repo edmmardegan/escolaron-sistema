@@ -34,14 +34,23 @@ export class AuthService {
 
   // ESSA É A FUNÇÃO QUE ESTAVA FALTANDO:
   async login(user: any) {
-    const payload = { username: user.username, sub: user.id, role: user.role };
+    // 1. Colocamos as informações no Payload (o que vai dentro do Token)
+    const payload = {
+      username: user.email,
+      sub: user.id,
+      role: user.role,
+      primeiroAcesso: user.primeiroAcesso, // Importante para segurança extra
+    };
+
     return {
       access_token: await this.jwtService.signAsync(payload),
+      // 2. Retornamos o objeto que o React vai salvar no localStorage
       user: {
         id: user.id,
-        nome: user.nome || user.username, // Garante que tenha um nome
+        nome: user.nome,
         email: user.email,
-        role: user.role, // ESSENCIAL para o menu aparecer
+        role: user.role,
+        primeiroAcesso: user.primeiroAcesso, // O Frontend vai ler isso aqui!
       },
     };
   }
