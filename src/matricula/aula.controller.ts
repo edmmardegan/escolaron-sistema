@@ -55,7 +55,8 @@ export class AulaController {
   }
 
   @Post('gerar-mensal')
-  async gerarAulasMensais() {
-    return await this.aulaService.gerarAulasDoMes();
+  async gerarAulasMensais(@Body() corpo: { mes: number; ano: number }) {
+    // Passamos os valores desestruturados para o service
+    return await this.aulaService.gerarAulasDoMes(corpo.mes, corpo.ano);
   }
 }

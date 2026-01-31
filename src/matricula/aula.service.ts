@@ -88,17 +88,21 @@ export class AulaService {
     });
   }
 
-  async gerarAulasDoMes() {
-    console.log('--- INICIANDO GERAÇÃO DE AGENDA (VERSÃO CORRIGIDA) ---');
-    try {
-      const agora = new Date();
-      const mesAtual = agora.getMonth();
-      const anoAtual = agora.getFullYear();
+  async gerarAulasDoMes(mesAlvo: number, anoAlvo: number) {
+    console.log(
+      `--- INICIANDO GERAÇÃO: Mês ${mesAlvo + 1} / Ano ${anoAlvo} ---`,
+    );
 
+    try {
+      // 1. Buscamos as matrículas ativas e seus respectivos termos
       const matriculas = await this.matriculaRepo.find({
         where: { situacao: 'Em Andamento' },
         relations: ['aluno', 'termos'],
       });
+
+      console.log(
+        `Encontradas ${matriculas.length} matrículas para processar.`,
+      );
 
       let totalCriadas = 0;
       const mapaDias = {
@@ -112,58 +116,88 @@ export class AulaService {
       };
 
       for (const mat of matriculas) {
-        // 1. BUSCA O TERMO CORRETO (A lógica que faltava)
-        // Em vez de mat.termos[0], procuramos o termo que bate com mat.termo_atual
+        // 2. Localiza o termo correto baseado no termo_atual da matrícula
         const termoAtivo = mat.termos.find(
           (t) => t.numeroTermo === mat.termo_atual,
         );
 
-        if (!termoAtivo) {
+        // Validação amigável para evitar erros de 'undefined'
+        if (!termoAtivo || !mat.dataInicio || !mat.diaSemana) {
           console.warn(
-            `[AVISO] Aluno ${mat.aluno?.nome} está no termo ${mat.termo_atual}, mas esse termo não existe na tabela matricula_termo.`,
+            `[PULANDO] Aluno: ${mat.aluno?.nome} - Verifique se tem Termo cadastrado, Data de Início e Dia da Semana.`,
           );
           continue;
         }
 
-        const diaSemanaJs = mapaDias[mat.diaSemana?.trim()];
-        if (diaSemanaJs === undefined) continue;
+        const diaSemanaJs = mapaDias[mat.diaSemana.trim()];
 
-        console.log(
-          `> Gerando para ${mat.aluno?.nome} (Termo: ${termoAtivo.numeroTermo})`,
-        );
+        // Data de referência do aluno para o cálculo quinzenal (Início da Matrícula)
+        const dataRef = new Date(mat.dataInicio);
+        dataRef.setHours(12, 0, 0, 0);
 
+        // 3. Loop pelos dias do mês (O JavaScript cuidará de meses com 28, 30 ou 31 dias)
         for (let d = 1; d <= 31; d++) {
-          const dataAula = new Date(anoAtual, mesAtual, d, 12, 0, 0);
-          if (dataAula.getMonth() !== mesAtual) break;
+          // Criamos a data da aula usando os parâmetros que vieram do seu Select (Combobox)
+          const dataAula = new Date(anoAlvo, mesAlvo, d, 12, 0, 0);
 
+          // --- A TRAVA DE SEGURANÇA ---
+          // Se a data gerada 'pulou' para o mês seguinte, interrompemos o loop para este aluno
+          if (dataAula.getMonth() !== mesAlvo) {
+            break;
+          }
+
+          // Se o dia da semana da data atual bater com o dia da matrícula
           if (dataAula.getDay() === diaSemanaJs) {
-            const dataFormatada = dataAula.toISOString().split('T')[0];
+            let deveGerar = false;
 
-            // 2. VERIFICAÇÃO DE DUPLICIDADE
-            const existe = await this.aulaRepo.findOne({
-              where: {
-                termo: { id: termoAtivo.id },
-                data: Raw(
-                  (alias) => `CAST(${alias} AS DATE) = '${dataFormatada}'`,
-                ),
-              },
-            });
+            // LÓGICA DE FREQUÊNCIA
+            if (mat.frequencia === 'Semanal') {
+              deveGerar = true;
+            } else if (mat.frequencia === 'Quinzenal') {
+              // Calcula a diferença de semanas exatas entre a aula e o início da vida acadêmica do aluno
+              const diffEmMs = dataAula.getTime() - dataRef.getTime();
+              const semanasDesdeOInicio = Math.floor(
+                diffEmMs / (1000 * 60 * 60 * 24 * 7),
+              );
 
-            if (!existe) {
-              await this.aulaRepo.save({
-                termo: termoAtivo,
-                data: dataAula,
-                status: 'Pendente',
+              // Regra: Uma semana sim (Par), uma semana não (Ímpar)
+              if (semanasDesdeOInicio % 2 === 0) {
+                deveGerar = true;
+              }
+            }
+
+            if (deveGerar) {
+              const dataFormatada = dataAula.toISOString().split('T')[0];
+
+              // 4. Verificação de duplicidade (Evita gerar a mesma aula duas vezes se clicar de novo)
+              const existe = await this.aulaRepo.findOne({
+                where: {
+                  termo: { id: termoAtivo.id },
+                  data: Raw(
+                    (alias) => `CAST(${alias} AS DATE) = '${dataFormatada}'`,
+                  ),
+                },
               });
-              totalCriadas++;
+
+              if (!existe) {
+                await this.aulaRepo.save({
+                  termo: termoAtivo,
+                  data: dataAula,
+                  status: 'Pendente',
+                });
+                totalCriadas++;
+              }
             }
           }
         }
       }
 
-      return { message: `Sucesso! Foram geradas ${totalCriadas} novas aulas.` };
+      console.log(`--- GERAÇÃO CONCLUÍDA: ${totalCriadas} aulas criadas ---`);
+      return {
+        message: `Sucesso! Foram geradas ${totalCriadas} novas aulas para o período selecionado.`,
+      };
     } catch (error) {
-      console.error('--- ERRO NA GERAÇÃO ---', error);
+      console.error('--- ERRO FATAL NA GERAÇÃO DA AGENDA ---', error);
       throw error;
     }
   }
