@@ -17,13 +17,11 @@ export class FinanceiroController {
     return resultado;
   }
 
-  @Post('gerar-lote-anual')
+  @Post('gerar-lote-anual') // <--- Esta string define a rota
   async gerarLoteAnual(@Body() body: { ano: number }): Promise<any> {
-    // Mudamos para 'any' para aceitar o objeto { gerados: number } com segurança
     const resultado = await this.financeiroService.gerarParcelaGlobal(body.ano);
-    return resultado;
+    return resultado; // Retorna { gerados: X }
   }
-  u;
 
   @Get()
   async findAll(): Promise<Financeiro[]> {

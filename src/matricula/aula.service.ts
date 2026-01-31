@@ -1,15 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan } from 'typeorm';
+import { Repository, Between, LessThan, Raw } from 'typeorm';
 import { Aula } from '../entities/aula.entity';
 import { Matricula } from '../entities/matricula.entity';
 import { MatriculaTermo } from '../entities/matricula-termo.entity';
+import { Like } from 'typeorm';
 
 @Injectable()
 export class AulaService {
   constructor(
     @InjectRepository(Aula)
-    private readonly repo: Repository<Aula>,
+    private readonly aulaRepo: Repository<Aula>,
 
     @InjectRepository(Matricula)
     private readonly matriculaRepo: Repository<Matricula>,
@@ -20,30 +21,28 @@ export class AulaService {
 
   // 1. Agenda do dia (Filtro por data no Calendário)
   async buscarPorData(dataStr: string) {
-    const inicio = new Date(dataStr + 'T00:00:00');
-    const fim = new Date(dataStr + 'T23:59:59');
+    const aulas = await this.aulaRepo
+      .createQueryBuilder('aula')
+      .leftJoinAndSelect('aula.termo', 'termo')
+      .leftJoinAndSelect('termo.matricula', 'matricula')
+      .leftJoinAndSelect('matricula.aluno', 'aluno')
+      .leftJoinAndSelect('matricula.curso', 'curso')
+      .where('CAST(aula.data AS DATE) = :data', { data: dataStr })
+      .orderBy('aula.data', 'ASC')
+      .getMany();
 
-    return this.repo.find({
-      where: { data: Between(inicio, fim) },
-      relations: [
-        'termo',
-        'termo.matricula',
-        'termo.matricula.aluno',
-        'termo.matricula.curso',
-      ],
-      order: { data: 'ASC' },
-    });
+    console.log('Aulas encontradas no Banco:', aulas.length);
+    return aulas;
   }
 
   // 2. Esquecidas (Aulas Pendentes de dias passados)
   async buscarNaoLancadas() {
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
+    const hoje = new Date().toISOString().split('T')[0]; // Pega '2026-01-31'
 
-    return this.repo.find({
+    return this.aulaRepo.find({
       where: {
         status: 'Pendente',
-        data: LessThan(hoje),
+        data: LessThan(new Date(hoje + 'T00:00:00Z')), // Garante comparação correta
       },
       relations: [
         'termo',
@@ -51,13 +50,13 @@ export class AulaService {
         'termo.matricula.aluno',
         'termo.matricula.curso',
       ],
-      order: { data: 'ASC' },
+      order: { data: 'DESC' }, // As mais recentes primeiro
     });
   }
 
   // 3. Reposições Pendentes (Status Falta)
   async buscarPendentes() {
-    return this.repo.find({
+    return this.aulaRepo.find({
       where: { status: 'Falta' },
       relations: [
         'termo',
@@ -71,7 +70,7 @@ export class AulaService {
 
   // 4. Histórico Geral (Ordenado por Data e Nome)
   async buscarHistoricoGeral() {
-    return this.repo.find({
+    return this.aulaRepo.find({
       relations: [
         'termo',
         'termo.matricula',
@@ -89,106 +88,114 @@ export class AulaService {
     });
   }
 
-  // 5. Geração Manual de Aulas (Baseado no termo_atual da matrícula)
   async gerarAulasDoMes() {
-    const matriculas = await this.matriculaRepo.find();
-    const hoje = new Date();
-    const mes = hoje.getMonth();
-    const ano = hoje.getFullYear();
-    const novasAulas: Aula[] = [];
+    console.log('--- INICIANDO GERAÇÃO DE AGENDA (VERSÃO CORRIGIDA) ---');
+    try {
+      const agora = new Date();
+      const mesAtual = agora.getMonth();
+      const anoAtual = agora.getFullYear();
 
-    const inicioMes = new Date(ano, mes, 1, 0, 0, 0);
-    const fimMes = new Date(ano, mes + 1, 0, 23, 59, 59);
+      const matriculas = await this.matriculaRepo.find({
+        where: { situacao: 'Em Andamento' },
+        relations: ['aluno', 'termos'],
+      });
 
-    const mapaDias: Record<string, number> = {
-      Domingo: 0,
-      Segunda: 1,
-      Terca: 2,
-      Terça: 2,
-      Quarta: 3,
-      Quinta: 4,
-      Sexta: 5,
-      Sabado: 6,
-      Sábado: 6,
-    };
+      let totalCriadas = 0;
+      const mapaDias = {
+        Domingo: 0,
+        Segunda: 1,
+        Terca: 2,
+        Quarta: 3,
+        Quinta: 4,
+        Sexta: 5,
+        Sabado: 6,
+      };
 
-    for (const mat of matriculas) {
-      try {
-        if (mat.situacao !== 'Em Andamento' || !mat.diaSemana) continue;
+      for (const mat of matriculas) {
+        // 1. BUSCA O TERMO CORRETO (A lógica que faltava)
+        // Em vez de mat.termos[0], procuramos o termo que bate com mat.termo_atual
+        const termoAtivo = mat.termos.find(
+          (t) => t.numeroTermo === mat.termo_atual,
+        );
 
-        const jaTemAula = await this.repo
-          .createQueryBuilder('aula')
-          .innerJoin('aula.termo', 'termo')
-          .where('termo.matriculaId = :mId', { mId: mat.id })
-          .andWhere('aula.data BETWEEN :inicio AND :fim', {
-            inicio: inicioMes,
-            fim: fimMes,
-          })
-          .getOne();
-
-        if (jaTemAula) continue;
-
-        const termoDestino = await this.termoRepo.findOne({
-          where: {
-            matricula: { id: mat.id },
-            numeroTermo: mat.termo_atual || 1,
-          },
-        });
-
-        if (!termoDestino) continue;
-
-        const diaDesejado = mapaDias[mat.diaSemana] ?? 1;
-        const horarioStr = mat.horario || '08:00';
-        const [hora, minuto] = horarioStr.split(':').map(Number);
-
-        // Usamos let aqui porque vamos reatribuir o valor no loop de semanas
-        let dataReferencia = new Date(ano, mes, 1, hora, minuto, 0);
-
-        while (dataReferencia.getDay() !== diaDesejado) {
-          dataReferencia.setDate(dataReferencia.getDate() + 1);
+        if (!termoAtivo) {
+          console.warn(
+            `[AVISO] Aluno ${mat.aluno?.nome} está no termo ${mat.termo_atual}, mas esse termo não existe na tabela matricula_termo.`,
+          );
+          continue;
         }
 
-        while (dataReferencia.getMonth() === mes) {
-          const aula = this.repo.create({
-            data: new Date(dataReferencia),
-            status: 'Pendente',
-            termo: termoDestino,
-          });
-          novasAulas.push(aula);
+        const diaSemanaJs = mapaDias[mat.diaSemana?.trim()];
+        if (diaSemanaJs === undefined) continue;
 
-          const salto = mat.frequencia === 'Quinzenal' ? 14 : 7;
-          // Reatribuímos para uma nova instância para evitar o erro de const/let do linter
-          const proximaData = new Date(dataReferencia);
-          proximaData.setDate(proximaData.getDate() + salto);
-          dataReferencia = proximaData;
+        console.log(
+          `> Gerando para ${mat.aluno?.nome} (Termo: ${termoAtivo.numeroTermo})`,
+        );
+
+        for (let d = 1; d <= 31; d++) {
+          const dataAula = new Date(anoAtual, mesAtual, d, 12, 0, 0);
+          if (dataAula.getMonth() !== mesAtual) break;
+
+          if (dataAula.getDay() === diaSemanaJs) {
+            const dataFormatada = dataAula.toISOString().split('T')[0];
+
+            // 2. VERIFICAÇÃO DE DUPLICIDADE
+            const existe = await this.aulaRepo.findOne({
+              where: {
+                termo: { id: termoAtivo.id },
+                data: Raw(
+                  (alias) => `CAST(${alias} AS DATE) = '${dataFormatada}'`,
+                ),
+              },
+            });
+
+            if (!existe) {
+              await this.aulaRepo.save({
+                termo: termoAtivo,
+                data: dataAula,
+                status: 'Pendente',
+              });
+              totalCriadas++;
+            }
+          }
         }
-      } catch (err: unknown) {
-        // Correção do "Unsafe assignment":
-        const mensagemErro =
-          err instanceof Error ? err.message : 'Erro desconhecido';
-        console.error(`Falha no aluno ${mat.id}:`, mensagemErro);
       }
-    }
 
-    if (novasAulas.length === 0) return { message: 'Nenhuma nova aula.' };
-    return await this.repo.save(novasAulas);
+      return { message: `Sucesso! Foram geradas ${totalCriadas} novas aulas.` };
+    } catch (error) {
+      console.error('--- ERRO NA GERAÇÃO ---', error);
+      throw error;
+    }
   }
 
   // --- AÇÕES DE FREQUÊNCIA ---
 
   async registrarPresenca(id: number) {
-    return this.repo.update(id, { status: 'Presente', motivoFalta: null });
+    return this.aulaRepo.update(id, { status: 'Presente', motivoFalta: null });
   }
 
   async registrarFalta(id: number, motivo: string) {
-    return this.repo.update(id, { status: 'Falta', motivoFalta: motivo });
+    return this.aulaRepo.update(id, { status: 'Falta', motivoFalta: motivo });
   }
 
   async registrarReposicao(id: number, novaData: string) {
-    return this.repo.update(id, {
-      data: new Date(novaData),
-      status: 'Presente',
-      motivoFalta: null,
-    });
+    const aula = await this.aulaRepo.findOne({ where: { id } });
+
+    if (!aula) throw new NotFoundException('Aula não encontrada');
+
+    const dataHoje = new Date().toLocaleDateString('pt-BR');
+
+    // 1. O status vira Presença (pois a reposição foi concluída)
+    aula.status = 'Presença';
+
+    // 2. Gravamos a nota da reposição no campo OBS
+    // Mantemos qualquer observação que já existia e adicionamos a nova
+    const obsAnterior = aula.obs ? `${aula.obs} | ` : '';
+    aula.obs = `${obsAnterior}Aula de reposição realizada em ${dataHoje}`;
+
+    // 3. Opcional: Se quiser que a data da aula no banco mude para a data da reposição
+    // aula.data = new Date(novaData);
+
+    return await this.aulaRepo.save(aula);
   }
 }

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Financeiro } from '../entities/financeiro.entity';
 import { Matricula } from '../entities/matricula.entity';
-import { Repository } from 'typeorm';
+import { Repository, Like } from 'typeorm';
 
 export interface ResumoFinanceiro {
   Cristiane: number;
@@ -34,7 +34,7 @@ export class FinanceiroService {
     });
   }
 
-  // --- 1. ROTINA INDIVIDUAL ---
+  // --- 1. ROTINA INDIVIDUAL (COMPLETA E BLINDADA) ---
   async gerarParcelaIndividual(matriculaId: number, ano: number): Promise<any> {
     const matricula = await this.matriculaRepo.findOne({
       where: { id: matriculaId },
@@ -43,11 +43,18 @@ export class FinanceiroService {
 
     if (!matricula) throw new NotFoundException('Matrícula não encontrada.');
 
+    // 🛡️ TRAVA: Verifica se já existem parcelas para este ID neste ANO
+    const jaTem = await this.financeiroRepo.count({
+      where: {
+        matricula: { id: matriculaId },
+        dataVencimento: Like(`${ano}%`),
+      },
+    });
+
+    if (jaTem > 0)
+      return { message: 'Este aluno já possui parcelas para este ano.' };
+
     const novasParcelas: any[] = [];
-    const dataRef = matricula.dataInicio
-      ? new Date(matricula.dataInicio)
-      : new Date();
-    const mesInicio = dataRef.getMonth() + 1;
 
     // A. Taxa de Matrícula
     if (matricula.valorMatricula && Number(matricula.valorMatricula) > 0) {
@@ -63,21 +70,22 @@ export class FinanceiroService {
     }
 
     // B. Mensalidades
+    const dataRef = matricula.dataInicio
+      ? new Date(matricula.dataInicio)
+      : new Date();
+    // Se a matrícula for de um ano anterior, começa em Janeiro (1), senão no mês de início
+    const mesInicio = dataRef.getFullYear() < ano ? 1 : dataRef.getMonth() + 1;
+
     for (let mes = mesInicio; mes <= 12; mes++) {
       const mesStr = String(mes).padStart(2, '0');
+      let diaFinal = Number(matricula.diaVencimento || 10);
 
-      // Pegamos o dia de vencimento original da matrícula
-      let diaVencimentoEfetivo = Number(matricula.diaVencimento || 10);
+      // Regra de Calendário (Fevereiro e meses de 30 dias)
+      if (mesStr === '02' && diaFinal > 28) diaFinal = 28;
+      if (['04', '06', '09', '11'].includes(mesStr) && diaFinal > 30)
+        diaFinal = 30;
 
-      // REGRA DE FEVEREIRO: Se o dia for 30 (ou maior que 28), trava no 28
-      if (mesStr === '02' && diaVencimentoEfetivo > 28) {
-        diaVencimentoEfetivo = 28;
-      }
-
-      const diaStr = String(diaVencimentoEfetivo).padStart(2, '0');
-
-      // Mantemos o T12:00:00 para evitar erro de fuso horário
-      const dataVencimentoFixa = `${ano}-${mesStr}-${diaStr}T12:00:00`;
+      const dataVencimentoFixa = `${ano}-${mesStr}-${String(diaFinal).padStart(2, '0')}T12:00:00`;
 
       novasParcelas.push({
         aluno: matricula.aluno,
@@ -93,7 +101,7 @@ export class FinanceiroService {
     return await this.financeiroRepo.save(novasParcelas);
   }
 
-  // --- 2. ROTINA GLOBAL (CORRIGIDA) ---
+  // --- 2. ROTINA GLOBAL (COMPLETA E BLINDADA) ---
   async gerarParcelaGlobal(ano: number): Promise<any> {
     const matriculas = await this.matriculaRepo.find({
       where: { situacao: 'Em Andamento' },
@@ -103,20 +111,27 @@ export class FinanceiroService {
     let totalGerado = 0;
 
     for (const mat of matriculas) {
-      // Usamos any[] para evitar o erro de 'never' e Overload
+      // 🛡️ TRAVA: Verifica se esta matrícula específica já tem dados no ano
+      const parcelasExistentes = await this.financeiroRepo.count({
+        where: { matricula: { id: mat.id }, dataVencimento: Like(`${ano}%`) },
+      });
+
+      // Se já houver parcelas (count > 0), pula para o próximo aluno do loop
+      if (parcelasExistentes > 0) continue;
+
       const novas: any[] = [];
 
       for (let mes = 1; mes <= 12; mes++) {
         const mesStr = String(mes).padStart(2, '0');
         let diaFinal = Number(mat.diaVencimento || 10);
 
-        // 1. Regra para Fevereiro (vencimentos 30 viram 28)
-        if (mesStr === '02' && diaFinal > 28) {
-          diaFinal = 28;
-        }
+        // Regras de Fevereiro e meses curtos
+        if (mesStr === '02' && diaFinal > 28) diaFinal = 28;
+        if (['04', '06', '09', '11'].includes(mesStr) && diaFinal > 30)
+          diaFinal = 30;
 
-        const diaStr = String(diaFinal).padStart(2, '0');
-        const dataVencimentoFixa = `${ano}-${mesStr}-${diaStr}T12:00:00`;
+        const dataVencimentoFixa = `${ano}-${mesStr}-${String(diaFinal).padStart(2, '0')}T12:00:00`;
+
         novas.push({
           aluno: mat.aluno,
           matricula: mat,
@@ -128,7 +143,6 @@ export class FinanceiroService {
         });
       }
 
-      // Salva o lote de 12 parcelas deste aluno
       await this.financeiroRepo.save(novas);
       totalGerado++;
     }
@@ -157,7 +171,6 @@ export class FinanceiroService {
     return resumo;
   }
 
-  // --- MÉTODOS DE APOIO ---
   async pagar(id: number) {
     const parcela = await this.financeiroRepo.findOne({ where: { id } });
     if (!parcela) throw new NotFoundException('Parcela não encontrada');
